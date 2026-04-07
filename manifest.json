@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "YT Tools",
+  "version": "1.0",
+  "description": "Skips YouTube ads and shows dislike counts",
+  "permissions": ["storage"],
+  "host_permissions": ["https://returnyoutubedislike.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YT Tools"
+  }
+}

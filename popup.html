@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, sans-serif; width: 180px; padding: 14px; margin: 0; background: #0f0f0f; color: #fff; }
+    h2 { margin: 0 0 10px; font-size: 13px; color: #ff0000; letter-spacing: .5px; }
+    .row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 8px; }
+    .switch { position: relative; width: 36px; height: 20px; }
+    .switch input { display: none; }
+    .slider { position: absolute; inset: 0; background: #444; border-radius: 20px; cursor: pointer; transition: background .2s; }
+    .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; }
+    input:checked + .slider { background: #f00; }
+    input:checked + .slider::before { transform: translateX(16px); }
+  </style>
+</head>
+<body>
+  <h2>YT Tools</h2>
+  <div class="row"><span>Skip ads</span><label class="switch"><input type="checkbox" id="ads" checked><span class="slider"></span></label></div>
+  <div class="row"><span>Show dislikes</span><label class="switch"><input type="checkbox" id="dislikes" checked><span class="slider"></span></label></div>
+  <script src="popup.js"></script>
+</body>
+</html>
