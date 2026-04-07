@@ -1,19 +1,17 @@
 (function () {
   // ── Teardown on extension reload ──────────────────────────────────────────
-  // When the extension reloads, the port disconnects and we stop everything
-  // before Chrome can throw "Extension context invalidated"
   let alive = true;
   try {
     chrome.runtime.connect({ name: 'tab' }).onDisconnect.addListener(() => {
       alive = false;
       clearInterval(adTimer);
-      clearInterval(dislikeTimer);
+      clearInterval(mainTimer);
     });
   } catch { return; }
 
   // ── Ad skipper ────────────────────────────────────────────────────────────
   const RATE = 16;
-  const SKIP = [
+  const SKIP_SELS = [
     '.ytp-skip-ad-button',
     '.ytp-ad-skip-button',
     '.ytp-ad-skip-button-modern',
@@ -22,14 +20,13 @@
   let adActive = false, savedRate = 1;
 
   function tickAd() {
-    if (!alive) return;
     const v = document.querySelector('video');
     if (!v) return;
     const isAd = !!document.querySelector('.ad-showing');
     if (isAd) {
       if (!adActive) { adActive = true; savedRate = v.playbackRate || 1; v.muted = true; }
       v.playbackRate = RATE;
-      SKIP.forEach(s => { const b = document.querySelector(s); if (b) b.click(); });
+      for (const s of SKIP_SELS) { const b = document.querySelector(s); if (b) { b.click(); break; } }
     } else if (adActive) {
       adActive = false; v.playbackRate = savedRate; v.muted = false;
     }
@@ -37,10 +34,10 @@
   const adTimer = setInterval(tickAd, 300);
 
   // ── Dislike counter ───────────────────────────────────────────────────────
-  const LABEL = 'ryd-label';
-  let shownVideoId = null;
-  let dislikeCount = null;
-  let dislikeTimer = null;
+  const LABEL_ID = 'ryd-label';
+  let lastVideoId = null;
+  let pendingCount = null;
+  let injected = false;
 
   function fmt(n) {
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
@@ -48,73 +45,103 @@
     return n.toLocaleString();
   }
 
-  // Find the dislike button using every known YouTube selector
-  function findDislikeBtn() {
-    // aria-label is the most reliable cross-layout selector
-    const all = document.querySelectorAll('button');
-    for (const b of all) {
-      const label = (b.getAttribute('aria-label') || '').toLowerCase();
-      if (label.includes('dislike') && !label.includes('undo')) return b;
+  // Walk up from the dislike button until we find a container wide enough
+  // to sit alongside the button visually
+  function findInsertTarget() {
+    // Scan all buttons for one whose aria-label mentions "dislike"
+    for (const btn of document.querySelectorAll('button')) {
+      const lbl = (btn.getAttribute('aria-label') || '').toLowerCase();
+      if (!lbl.includes('dislike')) continue;
+
+      // Walk up to ytd-toggle-button-renderer, like-button-view-model,
+      // yt-button-shape or at most 6 levels — whichever comes first
+      let el = btn.parentElement;
+      for (let i = 0; i < 6; i++) {
+        if (!el) break;
+        const tag = el.tagName.toLowerCase();
+        if (
+          tag === 'ytd-toggle-button-renderer' ||
+          tag === 'like-button-view-model' ||
+          tag === 'dislike-button-view-model' ||
+          tag === 'yt-button-shape'
+        ) return el;
+        el = el.parentElement;
+      }
+      // Fallback: use the button's grandparent
+      return btn.parentElement?.parentElement ?? btn.parentElement;
     }
     return null;
   }
 
-  function injectLabel(count) {
-    // Remove stale label
-    document.getElementById(LABEL)?.remove();
-    const btn = findDislikeBtn();
-    if (!btn) return false;
+  function tryInject(count) {
+    document.getElementById(LABEL_ID)?.remove();
+    const target = findInsertTarget();
+    if (!target) return false;
 
-    const el = document.createElement('span');
-    el.id = LABEL;
-    el.textContent = fmt(count);
-    el.style.cssText = `
+    const span = document.createElement('span');
+    span.id = LABEL_ID;
+    span.textContent = fmt(count);
+    span.style.cssText = `
       font-size: 1.4rem;
       font-weight: 500;
       color: var(--yt-spec-text-primary, #fff);
-      margin-left: 4px;
+      margin-left: 6px;
       align-self: center;
+      display: inline-flex;
+      align-items: center;
       pointer-events: none;
-      display: inline-block;
-      vertical-align: middle;
+      white-space: nowrap;
     `;
-    btn.parentNode.insertBefore(el, btn.nextSibling);
+    target.insertAdjacentElement('afterend', span);
     return true;
   }
 
-  function currentVideoId() {
-    return new URLSearchParams(location.search).get('v');
-  }
-
-  function scheduleInjection() {
-    if (!alive || dislikeCount === null) return;
-    clearInterval(dislikeTimer);
-    let attempts = 0;
-    dislikeTimer = setInterval(() => {
-      attempts++;
-      if (!alive || attempts > 30) { clearInterval(dislikeTimer); return; }
-      if (injectLabel(dislikeCount)) clearInterval(dislikeTimer);
-    }, 600);
-  }
-
-  function onNavigate() {
-    if (!alive) return;
-    const id = currentVideoId();
-    if (!id || id === shownVideoId) return;
-    shownVideoId = id;
-    dislikeCount = null;
-    document.getElementById(LABEL)?.remove();
-
+  async function fetchCount(videoId) {
+    // Try direct fetch (content script has host_permissions for the RYD domain)
     try {
-      chrome.runtime.sendMessage({ type: 'getDislikes', videoId: id }, (res) => {
-        if (!alive || !res?.ok || res.count === null) return;
-        dislikeCount = res.count;
-        scheduleInjection();
-      });
-    } catch { /* context gone */ }
+      const r = await fetch('https://returnyoutubedislike.com/api/votes?videoId=' + videoId);
+      if (r.ok) {
+        const d = await r.json();
+        if (typeof d.dislikes === 'number') return d.dislikes;
+      }
+    } catch { /* fall through to background fetch */ }
+
+    // Fallback: ask the background service worker
+    return new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage({ type: 'getDislikes', videoId }, res => {
+          resolve(res?.count ?? null);
+        });
+      } catch { resolve(null); }
+    });
   }
 
-  window.addEventListener('yt-navigate-finish', onNavigate);
-  // Run on initial page load too
-  onNavigate();
+  async function onNewVideo(videoId) {
+    pendingCount = null;
+    injected = false;
+    document.getElementById(LABEL_ID)?.remove();
+
+    const count = await fetchCount(videoId);
+    if (!alive || count === null) return;
+    pendingCount = count;
+  }
+
+  // Main loop: detect video changes + retry injection until it sticks
+  const mainTimer = setInterval(async () => {
+    if (!alive) return;
+
+    const id = new URLSearchParams(location.search).get('v');
+
+    // New video detected
+    if (id && id !== lastVideoId) {
+      lastVideoId = id;
+      injected = false;
+      await onNewVideo(id);
+    }
+
+    // Keep trying to inject until it succeeds (button may not be in DOM yet)
+    if (!injected && pendingCount !== null) {
+      injected = tryInject(pendingCount);
+    }
+  }, 800);
 })();
