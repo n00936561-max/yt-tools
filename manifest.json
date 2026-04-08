@@ -4,7 +4,7 @@
   "version": "1.0",
   "description": "Skips YouTube ads and shows dislike counts",
   "permissions": ["storage"],
-  "host_permissions": ["https://returnyoutubedislike.com/*"],
+  "host_permissions": ["https://returnyoutubedislikeapi.com/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {

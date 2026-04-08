@@ -3,7 +3,7 @@
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type !== 'getDislikes') return false;
 
-  fetch('https://returnyoutubedislike.com/api/votes?videoId=' + msg.videoId, {
+  fetch('https://returnyoutubedislikeapi.com/votes?videoId=' + msg.videoId, {
     headers: {
       'Accept': 'application/json',
       'User-Agent': 'Mozilla/5.0 (compatible; YTTools/1.0)',
