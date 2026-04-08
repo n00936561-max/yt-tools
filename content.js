@@ -41,11 +41,15 @@
     busy = true;
     badge('RYD: fetching…', '#333');
 
+    // Fetch via background service worker — avoids CORS restrictions
     let count = null;
     try {
-      const r = await fetch('https://returnyoutubedislike.com/api/votes?videoId=' + videoId);
-      const d = await r.json();
-      count = typeof d.dislikes === 'number' ? d.dislikes : null;
+      count = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'getDislikes', videoId }, res => {
+          if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
+          resolve(res?.ok ? res.count : null);
+        });
+      });
     } catch (e) {
       badge('RYD: fetch failed — ' + e.message, '#900');
       busy = false;
