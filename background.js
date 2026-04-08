@@ -5,8 +5,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
 
   fetch('https://returnyoutubedislike.com/api/votes?videoId=' + msg.videoId)
     .then(r => r.json())
-    .then(d => reply({ ok: true, count: d.dislikes ?? null }))
-    .catch(() => reply({ ok: false, count: null }));
+    .then(d => reply({ ok: true, count: d.dislikes ?? null, raw: JSON.stringify(d).slice(0, 200) }))
+    .catch(e => reply({ ok: false, count: null, raw: e.message }));
 
   return true; // keep message channel open for async reply
 });

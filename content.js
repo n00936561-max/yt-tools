@@ -43,20 +43,23 @@
 
     // Fetch via background service worker — avoids CORS restrictions
     let count = null;
+    let rawDebug = '?';
     try {
-      count = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage({ type: 'getDislikes', videoId }, res => {
+      const res = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'getDislikes', videoId }, r => {
           if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
-          resolve(res?.ok ? res.count : null);
+          resolve(r);
         });
       });
+      rawDebug = res?.raw || '?';
+      count = res?.ok ? res.count : null;
     } catch (e) {
       badge('RYD: fetch failed — ' + e.message, '#900');
       busy = false;
       return;
     }
 
-    if (count === null) { badge('RYD: no count in response', '#900'); busy = false; return; }
+    if (count === null) { badge('RYD: no count — ' + rawDebug, '#900'); busy = false; return; }
     badge('RYD: got ' + fmt(count) + ', finding button…', '#333');
 
     let tries = 0;
