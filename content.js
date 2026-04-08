@@ -24,26 +24,66 @@
     return n.toLocaleString();
   }
 
-  function badge(msg, color) {
-    let el = document.getElementById('ryd-debug');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'ryd-debug';
-      el.style.cssText = 'position:fixed;top:70px;right:16px;z-index:2147483647;padding:8px 12px;border-radius:8px;font:bold 14px monospace;color:#fff;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.5);';
-      document.documentElement.appendChild(el);
+  function findDislikeBtn() {
+    return (
+      document.querySelector('#dislike-button button') ||
+      document.querySelector('#segmented-dislike-button button') ||
+      (() => { for (const b of document.querySelectorAll('button')) { if ((b.getAttribute('aria-label')||'').toLowerCase().includes('dislike')) return b; } })()
+    );
+  }
+
+  function inject(count) {
+    document.getElementById('ryd-count')?.remove();
+
+    const dislikeBtn = findDislikeBtn();
+    if (!dislikeBtn) return false;
+
+    // Try to clone the like button text container for native YT styling
+    const likeTextDiv = document.querySelector(
+      '.yt-spec-button-shape-next__button-text-content'
+    );
+
+    if (likeTextDiv) {
+      // Remove any existing text content from dislike button
+      dislikeBtn.querySelectorAll('.yt-spec-button-shape-next__button-text-content').forEach(e => e.remove());
+      // Switch from icon-only to icon+text
+      dislikeBtn.classList.remove('yt-spec-button-shape-next--icon-button');
+      dislikeBtn.classList.add('yt-spec-button-shape-next--icon-leading');
+      const clone = likeTextDiv.cloneNode(true);
+      clone.id = 'ryd-count';
+      (clone.querySelector('span[role="text"]') || clone.querySelector('span') || clone).textContent = fmt(count);
+      dislikeBtn.appendChild(clone);
+    } else {
+      // Fallback: insert count after the dislike button's outer container
+      const outer =
+        dislikeBtn.closest('ytd-toggle-button-renderer') ||
+        dislikeBtn.closest('like-button-view-model') ||
+        dislikeBtn.closest('yt-button-shape') ||
+        dislikeBtn.parentElement;
+
+      const span = document.createElement('span');
+      span.id = 'ryd-count';
+      span.style.cssText = `
+        color: var(--yt-spec-text-primary, #fff);
+        font-size: 1.4rem;
+        font-weight: 500;
+        margin-left: 4px;
+        align-self: center;
+        display: inline-flex;
+        align-items: center;
+      `;
+      span.textContent = fmt(count);
+      outer.insertAdjacentElement('afterend', span);
     }
-    el.textContent = msg;
-    el.style.background = color || '#222';
+
+    return true;
   }
 
   async function run(videoId) {
     if (busy) return;
     busy = true;
-    badge('RYD: fetching…', '#333');
 
-    // Fetch via background service worker — avoids CORS restrictions
     let count = null;
-    let rawDebug = '?';
     try {
       const res = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({ type: 'getDislikes', videoId }, r => {
@@ -51,59 +91,18 @@
           resolve(r);
         });
       });
-      rawDebug = res?.raw || '?';
       count = res?.ok ? res.count : null;
-    } catch (e) {
-      badge('RYD: fetch failed — ' + e.message, '#900');
-      busy = false;
-      return;
-    }
+    } catch { busy = false; return; }
 
-    if (count === null) { badge('RYD: no count — ' + rawDebug, '#900'); busy = false; return; }
-    badge('RYD: got ' + fmt(count) + ', finding button…', '#333');
+    if (count === null) { busy = false; return; }
 
+    // Retry injection until the button is in the DOM
     let tries = 0;
     const poll = setInterval(() => {
-      if (tries++ > 40) { clearInterval(poll); badge('RYD: button not found', '#900'); busy = false; return; }
-
-      const dislikeBtn =
-        document.querySelector('#dislike-button button') ||
-        document.querySelector('#segmented-dislike-button button') ||
-        (() => { for (const b of document.querySelectorAll('button')) { if ((b.getAttribute('aria-label')||'').toLowerCase().includes('dislike')) return b; } })();
-
-      if (!dislikeBtn) return;
-      clearInterval(poll);
-      document.getElementById('ryd-count')?.remove();
-
-      const likeTextDiv = document.querySelector(
-        '#like-button .yt-spec-button-shape-next__button-text-content, ' +
-        'ytd-toggle-button-renderer:first-child .yt-spec-button-shape-next__button-text-content'
-      );
-
-      if (likeTextDiv) {
-        dislikeBtn.querySelectorAll('.yt-spec-button-shape-next__button-text-content').forEach(e => e.remove());
-        dislikeBtn.classList.remove('yt-spec-button-shape-next--icon-button');
-        dislikeBtn.classList.add('yt-spec-button-shape-next--icon-leading');
-        const clone = likeTextDiv.cloneNode(true);
-        clone.id = 'ryd-count';
-        (clone.querySelector('span[role="text"]') || clone.querySelector('span') || clone).textContent = fmt(count);
-        dislikeBtn.appendChild(clone);
-        badge('RYD: ✓ ' + fmt(count), '#060');
-      } else {
-        const span = document.createElement('span');
-        span.id = 'ryd-count';
-        span.style.cssText = 'color:#fff;font-size:1.4rem;font-weight:500;margin-left:6px;display:inline-block;vertical-align:middle;';
-        span.textContent = fmt(count);
-        dislikeBtn.insertAdjacentElement('afterend', span);
-        badge('RYD: ✓ fallback ' + fmt(count), '#060');
-      }
-
-      busy = false;
+      if (tries++ > 40) { clearInterval(poll); busy = false; return; }
+      if (inject(count)) { clearInterval(poll); busy = false; }
     }, 500);
   }
-
-  // Show badge immediately so we know the script is alive
-  badge('RYD: waiting for video…', '#333');
 
   setInterval(() => {
     const id = new URLSearchParams(location.search).get('v');
